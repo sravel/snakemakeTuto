@@ -1,0 +1,360 @@
+## Snakemake - Tuto
+##
+## @RAVEL-Sebastien
+##
+
+import glob
+import re, sys
+from pathlib import Path
+
+###############################################################################
+# NOTE pas de caractere speciaux entre 2 wildcards
+
+# --- Importing Configuration Files --- #
+configfile: 'config.yaml'
+paired_data = False
+
+# dir and suffix
+samples_dir = config["DATA"]["directories"]["samples_dir"]
+reference_file =  config["DATA"]["directories"]["reference_file"]
+basename_reference = Path(reference_file).stem
+# print(basename_reference)
+out_dir = config["DATA"]["directories"]["out_dir"]
+
+# to lunch separator
+sep="#"
+
+
+#*###############################################################################
+# for Log Path of scheduleur
+for path in ["cleanning"]:
+	Path(f"{out_dir}/LOG/{path}/").resolve().mkdir(parents=True, exist_ok=True)
+
+#*###############################################################################
+SAMPLES, = glob_wildcards(samples_dir+"{samples}_R1.fastq.gz", followlinks=True)
+
+# Auto check if data is paired with flag _R2
+SAMPLES_PAIRED = []
+SAMPLES_SINGLE = []
+for sample in SAMPLES:
+	if Path(f"{samples_dir}{sample}_R2.fastq.gz").exists():
+		SAMPLES_PAIRED.append(sample)
+	else:
+		SAMPLES_SINGLE.append(sample)
+
+# print(f"SAMPLES_SINGLE: {SAMPLES_SINGLE}")
+# print(f"SAMPLES_PAIRED: {SAMPLES_PAIRED}")
+
+
+#*###############################################################################
+# --- Main Build Rules --- #
+rule final:
+	"""construct a table of all resume files"""
+	input:
+		# expand(out_dir+'1_mapping/paired/{samples}.bam', samples = SAMPLES_PAIRED),
+		# expand(out_dir+'1_mapping/single/{samples}.bam', samples = SAMPLES_SINGLE)
+		# expand(out_dir+'1_mapping/all/{samples}_IDXSTATS.txt', samples = SAMPLES),
+		expand(out_dir+'1_mapping/all/{samples}_DEPTH.txt', samples = SAMPLES),
+		out_dir+'2_merges_resume_files/all_mapping_stats_resume.csv',
+		out_dir+'2_merges_resume_files/all_mapping_stats_Depth_resume.csv'
+
+
+# 0 index of genome file
+rule bwa_index:
+	"""make index with bwa for reference file"""
+	threads: 1
+	input: 	fasta = reference_file
+	params: l_mem_free='4G',
+			queue="normal.q",
+			errorLog =  f'{out_dir}LOG/0_INDEX_{basename_reference}_bwaindex.e',
+			outputLog = f'{out_dir}LOG/0_INDEX_{basename_reference}_bwaindex.o'
+	output: sa_file = reference_file+".sa"
+	message: """Execute BWA INDEX for """+reference_file+"""
+		Input:
+			- Fasta : {input.fasta}
+			- Threads : {threads}
+			"""+f"\n{sep*108}"
+	shell: config["MODULES"]["BWA"]+"""
+		bwa index {input.fasta}
+	"""
+
+# 1=atropos PE
+rule run_atropos_PE:
+	"""Run atropos for cleanning data"""
+	threads: 5
+	input: 	pe1 = samples_dir+'{samples}_R1.fastq.gz',
+			pe2 = samples_dir+'{samples}_R2.fastq.gz'
+	params: l_mem_free='4G',
+			queue="normal.q",
+			errorLog =  out_dir+'LOG/0_ATROPOS_{samples}.e',
+			outputLog = out_dir+'LOG/0_ATROPOS_{samples}.o'
+	output: R1 = out_dir+'0_cleanning/paired/{samples}_R1.ATROPOS.fastq.gz',
+			R2 = out_dir+'0_cleanning/paired/{samples}_R2.ATROPOS.fastq.gz'
+	message: """Execute atropos for
+		Input:
+			- Fastq : {input}
+			- Threads : {threads}"""+f"\n{sep*108}"
+	shell: config["MODULES"]["ATROPOS"]+"""
+		atropos --threads {threads} """+config["PARAMSTOOLS"]["ATROPOSPE"]+""" -o {output.R1} -p {output.R2} -pe1 {input.pe1} -pe2 {input.pe2}
+	"""
+
+# 1=atropos
+rule run_atropos_SE:
+	"""Run atropos for cleanning data"""
+	threads: 6
+	input: 	pe1 = samples_dir+'{samples}_R1.fastq.gz'
+	params: l_mem_free='4G',
+			queue="normal.q",
+			errorLog =  out_dir+'LOG/0_ATROPOS_{samples}.e',
+			outputLog = out_dir+'LOG/0_ATROPOS_{samples}.o'
+	output: R1 = out_dir+'0_cleanning/single/{samples}_R1.ATROPOS.fastq.gz'
+	message: """Execute atropos for
+		Input:
+			- Fastq : {input}
+			- Threads : {threads}"""+f"\n{sep*108}"
+	shell: config["MODULES"]["ATROPOS"]+"""
+		atropos --threads {threads} """+config["PARAMSTOOLS"]["ATROPOSSE"]+""" -o {output.R1} -se {input.pe1}
+	"""
+
+# 2=fastqc
+rule run_fastqc_PE:
+	"""Run fastqc for controle data"""
+	threads: 2
+	input: 	R1 = out_dir+'0_cleanning/paired/{samples}_R1.ATROPOS.fastq.gz',
+			R2 = out_dir+'0_cleanning/paired/{samples}_R2.ATROPOS.fastq.gz'
+	params: l_mem_free='2G',
+			queue="normal.q",
+			errorLog =  out_dir+'LOG/0_FASTQC_{samples}.e',
+			outputLog = out_dir+'LOG/0_FASTQC_{samples}.o'
+	output: R1 = out_dir+'0_cleanning/paired/{samples}_R1.ATROPOS_fastqc.html',
+			R2 = out_dir+'0_cleanning/paired/{samples}_R2.ATROPOS_fastqc.html'
+	message: """Execute fastqc for
+		Input:
+			- Fastq : {input}
+			- Threads : {threads}"""+f"\n{sep*108}"
+	shell: config["MODULES"]["FASTQC"]+"""
+		fastqc -t {threads} {input.R1} {input.R2}
+	"""
+rule run_fastqc_SE:
+	"""Run fastqc for controle data"""
+	threads: 1
+	input: 	R1 = out_dir+'0_cleanning/single/{samples}_R1.ATROPOS.fastq.gz'
+	params: l_mem_free='2G',
+			queue="normal.q",
+			errorLog =  out_dir+'LOG/0_FASTQC_{samples}.e',
+			outputLog = out_dir+'LOG/0_FASTQC_{samples}.o'
+	output: R1 = out_dir+'0_cleanning/single/{samples}_R1.ATROPOS_fastqc.html'
+	message: """Execute fastqc for
+		Input:
+			- Fastq : {input}
+			- Threads : {threads}"""+f"\n{sep*108}"
+	shell: config["MODULES"]["FASTQC"]+"""
+		fastqc -t {threads} {input.R1}
+	"""
+
+# 3=bwaAln
+rule run_bwa_aln_PE:
+	"""make bwa aln for all samples PE on all reference"""
+	threads: 6
+	input: 	fasta = reference_file,
+			index = reference_file+".sa",
+			R1 = out_dir+'0_cleanning/paired/{samples}_R1.ATROPOS.fastq.gz',
+			R2 = out_dir+'0_cleanning/paired/{samples}_R2.ATROPOS.fastq.gz'
+	params: l_mem_free='4G',
+			queue="normal.q",
+			errorLog = out_dir+'LOG/1_mapping_{samples}_bwaaln.e',
+			outputLog = out_dir+'LOG/1_mapping_{samples}_bwaaln.o'
+	output: sai_R1 = temp(out_dir+'1_mapping/paired/{samples}_R1.BWAALN.sai'),
+			sai_R2 = temp(out_dir+'1_mapping/paired/{samples}_R2.BWAALN.sai')
+	message: """Execute BWA ALN for
+		Input:
+			- Fasta : {input.fasta}
+			- Fastq : {input.R1} {input.R2}
+			- Threads : {threads}"""+f"\n{sep*108}"
+	shell: config["MODULES"]["BWA"]+"""
+		bwa aln -t {threads} -n 2 -f {output.sai_R1} {input.fasta} {input.R1} &&
+		bwa aln -t {threads} -n 2 -f {output.sai_R2} {input.fasta} {input.R2}
+	"""
+
+
+rule run_bwa_aln_SE:
+	"""make bwa aln for all samples SE on all reference"""
+	threads: 6
+	input: 	fasta = reference_file,
+			index = reference_file+".sa",
+			R1 = out_dir+'0_cleanning/single/{samples}_R1.ATROPOS.fastq.gz'
+	params: l_mem_free='4G',
+			queue="normal.q",
+			errorLog = out_dir+'LOG/1_mapping_{samples}_bwaaln.e',
+			outputLog = out_dir+'LOG/1_mapping_{samples}_bwaaln.o'
+	output: sai_R1 = temp(out_dir+'1_mapping/single/{samples}_R1.BWAALN.sai')
+	message: """Execute BWA ALN for
+		Input:
+			- Fasta : {input.fasta}
+			- Fastq : {input.R1}
+			- Threads : {threads}"""+f"\n{sep*108}"
+	shell: config["MODULES"]["BWA"]+"""
+		bwa aln -t {threads} -n 2 -f {output.sai_R1} {input.fasta} {input.R1}
+	"""
+
+
+rule bwa_samse_sort_bam:
+	"""make bwa samse for all samples SE on reference"""
+	threads: 6
+	input: 	fasta = reference_file,
+			index = reference_file+".sa",
+			R1 = out_dir+'0_cleanning/single/{samples}_R1.ATROPOS.fastq.gz',
+			sai_R1 = out_dir+'1_mapping/single/{samples}_R1.BWAALN.sai'
+	params: l_mem_free='4G',
+			queue="normal.q",
+			errorLog = out_dir+'LOG/1_mapping_{samples}_bwasamse.e',
+			outputLog = out_dir+'LOG/1_mapping_{samples}_bwasamse.o',
+			rg = "{samples}"
+	output: bam_file = out_dir+'1_mapping/single/{samples}.bam'
+	message: """Execute BWA SAMSE for
+		Input:
+			- Fasta : {input.fasta}
+			- Fastq : {input.R1}
+			- Threads : {threads}"""+f"\n{sep*108}"
+	shell: config["MODULES"]["BWA"]+"\n"+config["MODULES"]["SAMTOOLS"]+"""
+		readgroups="{params.rg}"
+		bwa samse -r"@RG\tID:${{readgroups}}\tSM:${{readgroups}}\tPL:Illumina" {input.fasta} {input.sai_R1} {input.R1} |
+		samtools view -@ {threads} -bh |
+		samtools sort -@ {threads} -o {output.bam_file}
+	"""
+
+rule bwa_sampe_sort_bam:
+	"""make bwa sampe for all samples PE on reference"""
+	threads: 6
+	input: 	fasta = reference_file,
+			index = reference_file+".sa",
+			R1 = out_dir+'0_cleanning/paired/{samples}_R1.ATROPOS.fastq.gz',
+			R2 = out_dir+'0_cleanning/paired/{samples}_R2.ATROPOS.fastq.gz',
+			sai_R1 = out_dir+'1_mapping/paired/{samples}_R1.BWAALN.sai',
+			sai_R2 = out_dir+'1_mapping/paired/{samples}_R2.BWAALN.sai'
+	params: l_mem_free='4G',
+			queue="normal.q",
+			errorLog = out_dir+'LOG/1_mapping_{samples}_bwasampe.e',
+			outputLog = out_dir+'LOG/1_mapping_{samples}_bwasampe.o',
+			rg = "{samples}"
+	output: bam_file = out_dir+'1_mapping/paired/{samples}.bam'
+	message: """Execute BWA SAMPE for
+		Input:
+			- Fasta : {input.fasta}
+			- Fastq : {input.R1} {input.R2}
+			- Threads : {threads}"""+f"\n{sep*108}"
+	shell: config["MODULES"]["BWA"]+"\n"+config["MODULES"]["SAMTOOLS"]+"""
+		readgroups="{params.rg}"
+		bwa sampe -r"@RG\tID:${{readgroups}}\tSM:${{readgroups}}\tPL:Illumina" {input.fasta} {input.sai_R1} {input.sai_R2} {input.R1} {input.R2} |
+		samtools view -@ {threads} -bh |
+		samtools sort -@ {threads} -o {output.bam_file}
+		"""
+
+def get_files_path(wildcards):
+	if Path(samples_dir+wildcards.samples+"_R2.fastq.gz").exists():
+		return {"bam_in" : out_dir+'1_mapping/paired/{samples}.bam',
+				"R2": samples_dir+"{samples}_R2.fastq.gz"
+				}
+	else:
+		return {"bam_in" : out_dir+'1_mapping/single/{samples}.bam',
+				"R1": samples_dir+"{samples}_R1.fastq.gz"
+				}
+
+rule merge_bam_directories:
+	"""Merge paired and single on same directory and index"""
+	threads: 1
+	input: 	unpack(get_files_path)
+	params: l_mem_free='4G',
+			queue="normal.q",
+			errorLog = out_dir+'LOG/1_mapping_mv.e',
+			outputLog = out_dir+'LOG/1_mapping_mv.o',
+			path_single = out_dir+'1_mapping/single/',
+			path_paired = out_dir+'1_mapping/paired/'
+	output: path_all = out_dir+'1_mapping/all/{samples}.bam'
+	message: """Execute move for {input.bam_in} bam
+			 """+f"\n{sep*108}"
+	shell: config["MODULES"]["SAMTOOLS"]+"""
+		ln -s {input.bam_in} {output.path_all}
+		samtools index {output.path_all}
+	"""
+
+rule samtools_idxstats:
+	"""apply samtools idxstats on all bam SE end PE"""
+	threads: 4
+	input: 	bam = out_dir+'1_mapping/all/{samples}.bam'
+	params: l_mem_free='4G',
+			queue="normal.q",
+			errorLog = out_dir+'LOG/1_mapping_{samples}_samtools_idxstats.e',
+			outputLog = out_dir+'LOG/1_mapping_{samples}_samtools_idxstats.o'
+	output: txt_file = out_dir+'1_mapping/all/{samples}_IDXSTATS.txt'
+	message: """Execute samtools idxstats for
+		Input:
+			- BAM : {input.bam}
+			- Threads : {threads}"""+f"\n{sep*108}"
+	shell: config["MODULES"]["SAMTOOLS"]+"""
+		samtools idxstats -@ {threads} {input.bam} > {output.txt_file}
+	"""
+
+rule samtools_depth:
+	"""apply samtools depth on all bam SE end PE"""
+	threads: 1
+	input: 	bam = out_dir+'1_mapping/all/{samples}.bam'
+	params: l_mem_free='4G',
+			queue="normal.q",
+			errorLog = out_dir+'LOG/1_mapping_{samples}_samtools_depth.e',
+			outputLog = out_dir+'LOG/1_mapping_{samples}_samtools_depth.o'
+	output: txt_file = out_dir+'1_mapping/all/{samples}_DEPTH.txt'
+	message: """Execute samtools depth for
+		Input:
+			- BAM : {input.bam}
+			- Threads : {threads}"""+f"\n{sep*108}"
+	shell: config["MODULES"]["SAMTOOLS"]+"""
+		samtools depth {input.bam} > {output.txt_file}
+	"""
+
+
+rule merge_idxstats:
+	"""merge all samtools idxstats files"""
+	threads : 1
+	input : csv_resume = expand(rules.samtools_idxstats.output[0] , samples = SAMPLES),
+	params : l_mem_free='4G',
+			queue="normal.q",
+			errorLog = out_dir+'LOG/2_mergeResume.e',
+			outputLog = out_dir+'LOG/2_mergeResume.o'
+	output :csv_resume_merge = report(out_dir+'2_merges_resume_files/all_mapping_stats_resume.csv', category="Resume mapping infos")
+	message: """Execute mergeResume for all samples
+		Input:
+		- CSV: {input.csv_resume}
+		- Threads : {threads}"""+f"\n{sep*108}"
+	run :
+		parse_idxstats(input.csv_resume, output.csv_resume_merge, sep="\t")
+
+########################## STATS BAM
+rule bam_stats_to_csv:
+	"""build csv with mean depth, median depth and mean coverage for all bam"""
+	threads : 1
+	input : bam_file = rules.bwa_sampe_sort_bam.output[0]
+	params :errorLog = out_dir+'LOG/2_bam_stats_to_csv-{samples}.e',
+			outputLog = out_dir+'LOG/2_bam_stats_to_csv-{samples}.o'
+	output :csv_resume = temp(out_dir+'2_merges_resume_files/{samples}_Depth_resume.csv')
+	message: """Execute mergeResume for all samples
+		Input:
+		- CSV: {input.bam_file}
+		- Threads : {threads}"""+f"\n{sep*108}"
+	run :
+		check_mapping_stats(input.bam_file, output.csv_resume, sep="\t")
+
+rule merge_bam_stats:
+	"""merge all bam_stats_to_csv files"""
+	threads : 1
+	input : csv_resume = expand(rules.bam_stats_to_csv.output[0] , samples = SAMPLES),
+	params :errorLog = out_dir+'LOG/2_mergeResume3.e',
+			outputLog = out_dir+'LOG/2_mergeResume3.o'
+	output :csv_resume_merge = report(out_dir+'2_merges_resume_files/all_mapping_stats_Depth_resume.csv', category="Resume mapping infos")
+	message: """Execute mergeResume for all samples
+		Input:
+		- CSV: {input.csv_resume}
+		- Threads : {threads}"""+f"\n{sep*108}"
+	run :
+		merge_bam_stats_csv(input.csv_resume, output.csv_resume_merge, sep="\t")
+################################################################################

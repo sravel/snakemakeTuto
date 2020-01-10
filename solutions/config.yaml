@@ -1,0 +1,34 @@
+# Master Snakemake Tuto configuration file template
+# ------------------------------------------
+
+####################
+# Input output data options
+'DATA':
+    'directories':
+        'samples_dir': "../datas/pairedTwoIndividusGzippedIrigin/"       # samples dir
+        'reference_file': "../datas/referenceIrigin.fasta"       # references dir
+        'out_dir': "./TEST_SNAKE/"       # Out directory
+
+##################
+# Pipeline options
+'PIPE_OPTION':
+    'debug': True
+
+##############################
+# Location of various software
+#
+# the variable must load soft on the $PATH environement
+MODULES:
+    "SAMTOOLS": "module load bioinfo/samtools/1.9"         # use for filter reads and convert sam to bam
+    "PYTHON3": "module load system/python/3.7.3"           # Python3 >=3.6 with require libraries
+    "BWA": "module load bioinfo/bwa/0.7.15"                # for make the mapping
+    "ATROPOS": "module load system/python/3.7.3"           # for call atropos
+    "FASTQC": "module load bioinfo/FastQC/0.11.7"          # for quality
+
+
+############################
+# Options for programs
+
+PARAMSTOOLS:
+    "ATROPOSSE": "--minimum-length 35  -q 20  -u 8  -O 10"
+    "ATROPOSPE": "--minimum-length 35  -q 20,20  -U 8  -O 10"

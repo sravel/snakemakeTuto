@@ -1,0 +1,29 @@
+__default__:
+    n_cpu: "-pe ompi "
+    mem: "-l mem_free=4G"
+    export_env: "-V"
+    cwd: "-cwd"
+    logerror: "-e "
+    log: "-o "
+    queue: " -q bioinfo2.q"
+    jobname: "{rulename}.{name}.{jobid}"
+
+#__default__:
+#    n_cpu: "--ntasks=1 --cpus-per-task="
+#    mem: "--mem-per-cpu=4G"
+#    export_env: "--export=ALL"
+#    cwd: " "
+#    logerror: "-e "
+#    log: "-o "
+#    queue: " -p supermem"
+#    jobname: "{rulename}.{name}.{jobid}"
+
+
+bwaAln:
+    mem: "-l mem_free=2G"
+bwaSamse:
+    mem: "-l mem_free=8G"
+samtoolsfilter:
+    mem: "-l mem_free=8G"
+samtoolsMerge:
+    mem: "-l mem_free=8G"
